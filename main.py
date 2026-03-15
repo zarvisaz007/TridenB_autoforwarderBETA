@@ -270,22 +270,48 @@ async def run_forwarder(client):
         print("No enabled tasks. Create and enable a task first.")
         return
 
+    # Resolve source channel entities so Telethon can match events correctly
     source_to_tasks = {}
     for t in enabled:
         sid = t["source_channel_id"]
         source_to_tasks.setdefault(sid, []).append(t)
 
-    print(f"\nForwarder running — watching {len(source_to_tasks)} source(s) across {len(enabled)} task(s).")
+    print("\nResolving source channels...")
+    resolved_entities = []
+    resolved_ids = {}  # entity -> original task sid key
+    for sid in list(source_to_tasks.keys()):
+        try:
+            entity = await client.get_entity(sid)
+            resolved_entities.append(entity)
+            resolved_ids[entity.id] = sid
+            print(f"  OK: {getattr(entity, 'title', sid)} (stored id={sid}, entity id={entity.id})")
+        except Exception as e:
+            print(f"  FAIL to resolve {sid}: {e}")
+
+    if not resolved_entities:
+        print("No source channels could be resolved. Check your channel IDs.")
+        return
+
+    print(f"\nForwarder running — watching {len(resolved_entities)} source(s) across {len(enabled)} task(s).")
     print("Press Ctrl+C to stop.\n")
 
-    @client.on(events.NewMessage(chats=list(source_to_tasks.keys())))
+    @client.on(events.NewMessage(chats=resolved_entities))
     async def handler(event):
-        src_id = event.chat_id
-        for task in source_to_tasks.get(src_id, []):
+        raw_id = event.chat_id
+        # Map event chat_id back to the stored task sid key
+        # event.chat_id may be -100X format; entity.id is raw X
+        abs_id = abs(raw_id) % (10 ** 12)  # strip -100 prefix
+        sid = resolved_ids.get(abs_id) or resolved_ids.get(raw_id)
+        tasks_for_src = source_to_tasks.get(sid, [])
+
+        text_preview = repr((event.message.text or "")[:60])
+        print(f"[MSG] chat_id={raw_id} abs={abs_id} sid={sid} text={text_preview}")
+
+        for task in tasks_for_src:
             should_forward, modified_text = apply_filters(event.message, task["filters"])
             if not should_forward:
+                print(f"  [SKIP] '{task['name']}' — filtered out")
                 continue
-            # Support both old single-ID and new multi-ID schema
             dest_ids = task.get("destination_channel_ids") or [task.get("destination_channel_id")]
             for dest_id in dest_ids:
                 try:
@@ -293,11 +319,12 @@ async def run_forwarder(client):
                         await client.forward_messages(dest_id, event.message)
                     else:
                         await client.send_message(dest_id, modified_text)
+                    print(f"  [OK] '{task['name']}' → {dest_id}")
                 except FloodWaitError as e:
-                    print(f"FloodWait: sleeping {e.seconds}s")
+                    print(f"  [FLOOD] sleeping {e.seconds}s")
                     await asyncio.sleep(e.seconds)
                 except Exception as e:
-                    print(f"Error forwarding to {dest_id}: {e}")
+                    print(f"  [ERR] '{task['name']}' → {dest_id}: {e}")
 
     await client.run_until_disconnected()
 
