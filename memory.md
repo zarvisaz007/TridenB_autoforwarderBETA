@@ -25,10 +25,23 @@ Local CLI tool that forwards Telegram messages from source channels to destinati
 - No text mod → `forward_messages()` (preserves media + formatting)
 - Text modified → `send_message()` (text only)
 
-## Current Status (2026-03-15)
-Options 1, 2, 3 complete. First real task created ("Options expert").
-Next: verify Option 4 (Toggle), 5 (Edit Filters), 6 (Delete), 7 (Run Forwarder).
-See `tasks/progress.md` for checklist.
+## Current Status (2026-03-16)
+Core forwarder fully implemented. Background forwarder, logs, pause, loop protection all done.
+Remaining: live test options 5, 6, and end-to-end forwarding with "Test" task.
+See `tasks/progress.md` for full checklist.
+
+## Menu Options
+1. Get Channel ID — lists all channels/groups
+2. Create Task — source + multiple destinations + filters
+3. List Tasks — shows enabled/paused status
+4. Toggle Task — enable/disable (persisted to tasks.json)
+5. Edit Task Filters
+6. Delete Task
+7. Start Forwarder — background, non-blocking, returns to menu
+8. Stop Forwarder — removes event handlers cleanly
+9. Pause/Resume Task — session-only pause, resets loop counter on resume
+10. View Logs — last 50 timestamped entries
+0. Exit — prompts to stop forwarder if running
 
 ## Key Files
 - `main.py` — all logic, single file

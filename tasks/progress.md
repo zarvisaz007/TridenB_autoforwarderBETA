@@ -13,27 +13,34 @@
 - [x] Initial commit (no .env)
 - [x] Script launched in separate Terminal for OTP auth
 
-## Feature Verification (work one at a time)
+## Feature Verification
 - [x] Option 1: Get Channel ID — lists all channels/groups with IDs
-- [x] Option 2: Create Forwarding Task — supports multiple destination IDs
-- [x] Option 3: List Tasks — shows all destinations in one row
-- [ ] Option 4: Toggle Task — flip enabled/disabled
+- [x] Option 2: Create Forwarding Task — supports multiple destination IDs (comma-separated)
+- [x] Option 3: List Tasks — shows enabled, paused, source, destinations
+- [x] Option 4: Toggle Task — flip enabled/disabled (persisted)
 - [ ] Option 5: Edit Task Filters — modify a filter, confirm saved
 - [ ] Option 6: Delete Task — confirm deletion
-- [ ] Option 7: Run Forwarder — end-to-end: send msg in source, check dest
-  - [ ] Normal forward (no filters) works
-  - [ ] Blacklist blocks message
-  - [ ] clean_urls strips URLs
-  - [ ] clean_usernames strips @handles
-  - [ ] skip_images drops image messages
+- [x] Option 7: Start Forwarder (background) — runs while menu stays live
+- [x] Option 8: Stop Forwarder — cleanly removes event handlers
+- [x] Option 9: Pause / Resume Task — per-session pause, resets loop counter on resume
+- [x] Option 10: View Logs — last 50 timestamped entries
+- [x] Copy mode — messages sent as fresh copies, no "Forwarded from" header
+- [x] Edit sync — edits in source propagate to all destination copies
+- [x] Delete sync — deletes in source remove copies from destinations
+- [x] Loop protection — task auto-pauses after 10 forwards in 10s
 
-## Live Task (as of 2026-03-15)
+## Live Tasks (as of 2026-03-16)
 - Task ID 1: "Options expert"
-  - Source: -1003302509533
-  - Destinations: 6 channels
+  - Source: -1003302509533 → 6 destination channels
   - Blacklist: monthly, yearly, support, team
-  - clean_urls: true, clean_usernames: true
-  - skip_images/audio/videos: true (text only)
+  - clean_urls/usernames: true | skip_images/audio/videos: true
+- Task ID 2: "Test"
+  - Source: -1003387418623 → -1002321373006
+  - clean_urls/usernames: true | skip_images/audio/videos: true
+
+## Remaining
+- [ ] Option 5 and 6 live test
+- [ ] End-to-end forwarding test with "Test" task
 
 ## Next Session Start
 Read `memory.md` and this file to restore context before continuing.
