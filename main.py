@@ -105,13 +105,17 @@ async def create_task(client):
     name = input("Task name: ").strip()
 
     src_raw = input("Source channel ID (e.g. -1001234567890): ").strip()
-    dst_raw = input("Destination channel ID (e.g. -1009876543210): ").strip()
+    dst_raw = input("Destination channel IDs (comma-separated, e.g. -1001111111111,-1002222222222): ").strip()
 
     try:
         source_id = int(src_raw)
-        dest_id = int(dst_raw)
+        dest_ids = [int(x.strip()) for x in dst_raw.split(",") if x.strip()]
     except ValueError:
         print("Invalid channel IDs.")
+        return
+
+    if not dest_ids:
+        print("At least one destination ID required.")
         return
 
     print("\nFilters (press Enter to skip / use defaults):")
@@ -136,7 +140,7 @@ async def create_task(client):
         "id": next_task_id(data),
         "name": name,
         "source_channel_id": source_id,
-        "destination_channel_id": dest_id,
+        "destination_channel_ids": dest_ids,
         "enabled": True,
         "filters": {
             "blacklist_words": blacklist,
@@ -161,11 +165,12 @@ async def list_tasks():
         print("No tasks found.")
         return
 
-    print(f"\n{'ID':<5} {'Name':<20} {'Enabled':<8} {'Source':<22} {'Destination':<22}")
-    print("-" * 80)
+    print(f"\n{'ID':<5} {'Name':<20} {'Enabled':<8} {'Source':<22} {'Destinations'}")
+    print("-" * 90)
     for t in tasks:
         status = "Yes" if t.get("enabled") else "No"
-        print(f"{t['id']:<5} {t['name']:<20} {status:<8} {t['source_channel_id']:<22} {t['destination_channel_id']:<22}")
+        dests = ", ".join(str(d) for d in t.get("destination_channel_ids", [t.get("destination_channel_id", "?")]))
+        print(f"{t['id']:<5} {t['name']:<20} {status:<8} {t['source_channel_id']:<22} {dests}")
 
 
 async def toggle_task():
@@ -280,17 +285,19 @@ async def run_forwarder(client):
             should_forward, modified_text = apply_filters(event.message, task["filters"])
             if not should_forward:
                 continue
-            dest_id = task["destination_channel_id"]
-            try:
-                if modified_text is None:
-                    await client.forward_messages(dest_id, event.message)
-                else:
-                    await client.send_message(dest_id, modified_text)
-            except FloodWaitError as e:
-                print(f"FloodWait: sleeping {e.seconds}s")
-                await asyncio.sleep(e.seconds)
-            except Exception as e:
-                print(f"Error forwarding to {dest_id}: {e}")
+            # Support both old single-ID and new multi-ID schema
+            dest_ids = task.get("destination_channel_ids") or [task.get("destination_channel_id")]
+            for dest_id in dest_ids:
+                try:
+                    if modified_text is None:
+                        await client.forward_messages(dest_id, event.message)
+                    else:
+                        await client.send_message(dest_id, modified_text)
+                except FloodWaitError as e:
+                    print(f"FloodWait: sleeping {e.seconds}s")
+                    await asyncio.sleep(e.seconds)
+                except Exception as e:
+                    print(f"Error forwarding to {dest_id}: {e}")
 
     await client.run_until_disconnected()
 
