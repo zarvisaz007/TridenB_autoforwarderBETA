@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 import os
 import re
@@ -65,6 +66,16 @@ def next_task_id(data):
     if not tasks:
         return 1
     return max(t["id"] for t in tasks) + 1
+
+
+def sync_paused_from_tasks():
+    """Populate paused_task_ids from persisted 'paused' field in tasks.json."""
+    data = load_tasks()
+    for t in data.get("tasks", []):
+        if t.get("paused"):
+            paused_task_ids.add(t["id"])
+        else:
+            paused_task_ids.discard(t["id"])
 
 
 def add_log(msg):
@@ -135,13 +146,13 @@ async def ainput(prompt=""):
     return await loop.run_in_executor(None, input, prompt)
 
 
-async def send_copy(client, dest_id, message, modified_text):
+async def send_copy(client, dest_id, message, modified_text, reply_to=None):
     """Send message as a fresh copy — no 'Forwarded from' header."""
     if modified_text is not None:
-        return await client.send_message(dest_id, modified_text)
+        return await client.send_message(dest_id, modified_text, reply_to=reply_to)
     if message.media:
-        return await client.send_file(dest_id, file=message.media, caption=message.text or "")
-    return await client.send_message(dest_id, message.text or "")
+        return await client.send_file(dest_id, file=message.media, caption=message.text or "", reply_to=reply_to)
+    return await client.send_message(dest_id, message.text or "", reply_to=reply_to)
 
 
 # ---------- Async CLI functions ----------
@@ -256,10 +267,79 @@ async def toggle_task():
     print(f"Task {tid} not found.")
 
 
-async def edit_task_filters():
+async def edit_filters_submenu(task, data):
+    """Interactive filter editor — pick individual filters to change."""
+    filters = task.setdefault("filters", {})
+    while True:
+        bl = filters.get("blacklist_words", [])
+        cw = filters.get("clean_words", [])
+        print(f"\n  --- Filters: '{task['name']}' ---")
+        print(f"  1. Blacklist words   : {', '.join(bl) or 'none'}")
+        print(f"  2. Clean words       : {', '.join(cw) or 'none'}")
+        print(f"  3. Remove URLs       : {'Yes' if filters.get('clean_urls') else 'No'}")
+        print(f"  4. Remove @usernames : {'Yes' if filters.get('clean_usernames') else 'No'}")
+        print(f"  5. Skip images       : {'Yes' if filters.get('skip_images') else 'No'}")
+        print(f"  6. Skip audio        : {'Yes' if filters.get('skip_audio') else 'No'}")
+        print(f"  7. Skip videos       : {'Yes' if filters.get('skip_videos') else 'No'}")
+        print(f"  0. Done")
+
+        sub = (await ainput("\n  Select filter to edit (0 to finish): ")).strip()
+
+        if sub == "1":
+            raw = (await ainput(f"    Words [{', '.join(bl) or 'none'}] (comma-sep, blank=clear): ")).strip()
+            filters["blacklist_words"] = [x.strip() for x in raw.split(",") if x.strip()] if raw else []
+            save_tasks(data)
+            print(f"    Saved: {filters['blacklist_words'] or 'none'}")
+        elif sub == "2":
+            raw = (await ainput(f"    Words [{', '.join(cw) or 'none'}] (comma-sep, blank=clear): ")).strip()
+            filters["clean_words"] = [x.strip() for x in raw.split(",") if x.strip()] if raw else []
+            save_tasks(data)
+            print(f"    Saved: {filters['clean_words'] or 'none'}")
+        elif sub == "3":
+            val = (await ainput(f"    Remove URLs? (y/n) [{'Y' if filters.get('clean_urls') else 'N'}]: ")).strip().lower()
+            if val in ("y", "yes"):
+                filters["clean_urls"] = True
+            elif val in ("n", "no"):
+                filters["clean_urls"] = False
+            save_tasks(data)
+        elif sub == "4":
+            val = (await ainput(f"    Remove @usernames? (y/n) [{'Y' if filters.get('clean_usernames') else 'N'}]: ")).strip().lower()
+            if val in ("y", "yes"):
+                filters["clean_usernames"] = True
+            elif val in ("n", "no"):
+                filters["clean_usernames"] = False
+            save_tasks(data)
+        elif sub == "5":
+            val = (await ainput(f"    Skip images? (y/n) [{'Y' if filters.get('skip_images') else 'N'}]: ")).strip().lower()
+            if val in ("y", "yes"):
+                filters["skip_images"] = True
+            elif val in ("n", "no"):
+                filters["skip_images"] = False
+            save_tasks(data)
+        elif sub == "6":
+            val = (await ainput(f"    Skip audio? (y/n) [{'Y' if filters.get('skip_audio') else 'N'}]: ")).strip().lower()
+            if val in ("y", "yes"):
+                filters["skip_audio"] = True
+            elif val in ("n", "no"):
+                filters["skip_audio"] = False
+            save_tasks(data)
+        elif sub == "7":
+            val = (await ainput(f"    Skip videos? (y/n) [{'Y' if filters.get('skip_videos') else 'N'}]: ")).strip().lower()
+            if val in ("y", "yes"):
+                filters["skip_videos"] = True
+            elif val in ("n", "no"):
+                filters["skip_videos"] = False
+            save_tasks(data)
+        elif sub == "0":
+            break
+        else:
+            print("  Invalid option.")
+
+
+async def edit_task():
     await list_tasks()
     try:
-        tid = int((await ainput("\nEnter task ID to edit filters: ")).strip())
+        tid = int((await ainput("\nEnter task ID to edit: ")).strip())
     except ValueError:
         print("Invalid ID.")
         return
@@ -270,37 +350,96 @@ async def edit_task_filters():
         print(f"Task {tid} not found.")
         return
 
-    filters = task["filters"]
-    print(f"\nCurrent filters for task '{task['name']}':")
-    for k, v in filters.items():
-        print(f"  {k}: {v}")
+    while True:
+        dests = task.get("destination_channel_ids", [])
+        print(f"\n--- Edit Task: '{task['name']}' (ID {task['id']}) ---")
+        print(f"1. Name           : {task['name']}")
+        print(f"2. Source channel : {task['source_channel_id']}")
+        print(f"3. Add destination(s)")
+        print(f"4. Remove destination(s) : {', '.join(str(d) for d in dests) or 'none'}")
+        print(f"5. Edit filters")
+        print(f"0. Back")
 
-    print("\nEdit filters (press Enter to keep current value):")
+        sub = (await ainput("\nSelect: ")).strip()
 
-    async def edit_list(key, prompt):
-        current = filters.get(key, [])
-        raw = (await ainput(f"  {prompt} [{', '.join(current) or 'none'}]: ")).strip()
-        if raw:
-            filters[key] = [x.strip() for x in raw.split(",") if x.strip()]
+        if sub == "1":
+            new_name = (await ainput(f"  New name [{task['name']}] (blank=keep): ")).strip()
+            if new_name:
+                task["name"] = new_name
+                save_tasks(data)
+                print(f"  Name updated to '{new_name}'.")
 
-    async def edit_bool(key, prompt):
-        current = filters.get(key, False)
-        raw = (await ainput(f"  {prompt} [{'Y' if current else 'N'}]: ")).strip().lower()
-        if raw in ("y", "yes"):
-            filters[key] = True
-        elif raw in ("n", "no"):
-            filters[key] = False
+        elif sub == "2":
+            new_src = (await ainput(f"  New source ID [{task['source_channel_id']}] (blank=keep): ")).strip()
+            if new_src:
+                try:
+                    task["source_channel_id"] = int(new_src)
+                    save_tasks(data)
+                    print(f"  Source updated. Restart forwarder to apply.")
+                except ValueError:
+                    print("  Invalid ID.")
 
-    await edit_list("blacklist_words", "Blacklist words")
-    await edit_list("clean_words", "Clean words")
-    await edit_bool("clean_urls", "Remove URLs?")
-    await edit_bool("clean_usernames", "Remove @usernames?")
-    await edit_bool("skip_images", "Skip images?")
-    await edit_bool("skip_audio", "Skip audio?")
-    await edit_bool("skip_videos", "Skip videos?")
+        elif sub == "3":
+            raw = (await ainput("  IDs to add (comma-separated): ")).strip()
+            if raw:
+                try:
+                    new_ids = [int(x.strip()) for x in raw.split(",") if x.strip()]
+                    added = [i for i in new_ids if i not in dests]
+                    dests.extend(added)
+                    task["destination_channel_ids"] = dests
+                    save_tasks(data)
+                    print(f"  Added: {added}")
+                except ValueError:
+                    print("  Invalid IDs.")
 
+        elif sub == "4":
+            if not dests:
+                print("  No destinations to remove.")
+            else:
+                print("  Current destinations:")
+                for i, d in enumerate(dests, 1):
+                    print(f"    {i}. {d}")
+                raw = (await ainput("  Enter numbers to remove (comma-separated): ")).strip()
+                if raw:
+                    try:
+                        indices = [int(x.strip()) - 1 for x in raw.split(",") if x.strip()]
+                        to_remove = {dests[i] for i in indices if 0 <= i < len(dests)}
+                        task["destination_channel_ids"] = [d for d in dests if d not in to_remove]
+                        save_tasks(data)
+                        print(f"  Removed: {sorted(to_remove)}")
+                    except (ValueError, IndexError):
+                        print("  Invalid selection.")
+
+        elif sub == "5":
+            await edit_filters_submenu(task, data)
+
+        elif sub == "0":
+            break
+        else:
+            print("Invalid option.")
+
+
+async def duplicate_task():
+    await list_tasks()
+    try:
+        tid = int((await ainput("\nEnter task ID to duplicate: ")).strip())
+    except ValueError:
+        print("Invalid ID.")
+        return
+
+    data = load_tasks()
+    task = next((t for t in data["tasks"] if t["id"] == tid), None)
+    if not task:
+        print(f"Task {tid} not found.")
+        return
+
+    new_task = copy.deepcopy(task)
+    new_task["id"] = next_task_id(data)
+    new_task["name"] = task["name"] + " (copy)"
+
+    data["tasks"].append(new_task)
     save_tasks(data)
-    print("Filters updated.")
+    print(f"Task '{task['name']}' duplicated as '{new_task['name']}' with ID {new_task['id']}.")
 
 
 async def delete_task():
@@ -380,6 +519,11 @@ async def start_forwarder(client):
         key = mmap_key(sid, event.message.id)
         mmap.setdefault(key, [])
 
+        # Detect if this message is a reply in the source channel
+        reply_to_src_id = None
+        if event.message.reply_to and event.message.reply_to.reply_to_msg_id:
+            reply_to_src_id = event.message.reply_to.reply_to_msg_id
+
         for task in tasks_for_src:
             if task["id"] in paused_task_ids:
                 add_log(f"  [PAUSED] '{task['name']}' skipped")
@@ -398,10 +542,22 @@ async def start_forwarder(client):
 
             dest_ids = task.get("destination_channel_ids") or [task.get("destination_channel_id")]
             for dest_id in dest_ids:
+                # Find the corresponding reply target in this destination (if any)
+                reply_to_dest_id = None
+                if reply_to_src_id is not None:
+                    reply_key = mmap_key(sid, reply_to_src_id)
+                    for entry in mmap.get(reply_key, []):
+                        if entry["task_id"] == task["id"] and entry["dest"] == dest_id:
+                            reply_to_dest_id = entry["msg_id"]
+                            break
+
                 try:
-                    sent = await send_copy(client, dest_id, event.message, modified_text)
+                    sent = await send_copy(client, dest_id, event.message, modified_text, reply_to=reply_to_dest_id)
                     mmap[key].append({"task_id": task["id"], "dest": dest_id, "msg_id": sent.id})
-                    add_log(f"  [OK] '{task['name']}' → {dest_id} (msg {sent.id})")
+                    if reply_to_dest_id:
+                        add_log(f"  [OK] '{task['name']}' → {dest_id} (msg {sent.id}, reply to {reply_to_dest_id})")
+                    else:
+                        add_log(f"  [OK] '{task['name']}' → {dest_id} (msg {sent.id})")
                 except FloodWaitError as e:
                     add_log(f"  [FLOOD] sleeping {e.seconds}s")
                     await asyncio.sleep(e.seconds)
@@ -513,10 +669,14 @@ async def pause_task_menu():
     if tid in paused_task_ids:
         paused_task_ids.discard(tid)
         loop_counter.pop(tid, None)  # reset loop counter on resume
+        task["paused"] = False
+        save_tasks(data)
         print(f"Task '{task['name']}' resumed.")
     else:
         paused_task_ids.add(tid)
-        print(f"Task '{task['name']}' paused (this session only).")
+        task["paused"] = True
+        save_tasks(data)
+        print(f"Task '{task['name']}' paused.")
 
 
 async def view_logs():
@@ -538,12 +698,13 @@ async def main_menu(client):
         print("2.  Create Forwarding Task")
         print("3.  List Tasks")
         print("4.  Toggle Task (enable/disable)")
-        print("5.  Edit Task Filters")
+        print("5.  Edit Task (source / destinations / filters)")
         print("6.  Delete Task")
         print("7.  Start Forwarder (background)")
         print("8.  Stop Forwarder")
         print("9.  Pause / Resume Task")
         print("10. View Logs")
+        print("11. Duplicate Task")
         print("0.  Exit")
 
         choice = (await ainput("\nSelect option: ")).strip()
@@ -557,7 +718,7 @@ async def main_menu(client):
         elif choice == "4":
             await toggle_task()
         elif choice == "5":
-            await edit_task_filters()
+            await edit_task()
         elif choice == "6":
             await delete_task()
         elif choice == "7":
@@ -568,6 +729,8 @@ async def main_menu(client):
             await pause_task_menu()
         elif choice == "10":
             await view_logs()
+        elif choice == "11":
+            await duplicate_task()
         elif choice == "0":
             if forwarder_active:
                 confirm = (await ainput("Forwarder is running. Stop and exit? [y/N]: ")).strip().lower()
@@ -593,6 +756,7 @@ async def main():
     client = TelegramClient(SESSION_NAME, int(api_id), api_hash)
     await client.start(phone=phone)
     print("Authenticated successfully.")
+    sync_paused_from_tasks()
 
     try:
         await main_menu(client)
