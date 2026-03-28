@@ -203,7 +203,7 @@ async def create_task(client):
     img_del_raw = (await ainput("  Auto-delete images after (days) [0=off]: ")).strip()
     image_delete_days = int(img_del_raw) if img_del_raw.isdigit() else 0
 
-    use_rewrite = await prompt_bool("  Enable Local AI Rewriting (Ollama)?")
+    use_rewrite = await prompt_bool("  Enable AI Rewriting (OpenRouter)?")
     rewrite_prompt = ""
     if use_rewrite:
         rewrite_prompt = (await ainput("  Rewrite prompt (e.g. 'Paraphrase to avoid copyright'): ")).strip()
@@ -286,7 +286,7 @@ async def edit_filters_submenu(task, data):
         print(f"  8. Delay seconds     : {filters.get('delay_seconds', 0)}")
         print(f"  9. Image delete days : {filters.get('image_delete_days', 0)}")
         rew_info = 'Enabled' if filters.get('rewrite_enabled') else 'Disabled'
-        print(f"  10. Local AI Rewrite : {rew_info}")
+        print(f"  10. AI Rewrite       : {rew_info}")
         print(f"  0. Done")
 
         sub = (await ainput("\n  Select filter to edit (0 to finish): ")).strip()
@@ -349,7 +349,7 @@ async def edit_filters_submenu(task, data):
                 save_tasks(data)
                 print(f"    Saved: image_delete_days = {filters['image_delete_days']}")
         elif sub == "10":
-            val = (await ainput(f"    Enable Local AI Rewrite? (y/n) [{'Y' if filters.get('rewrite_enabled') else 'N'}]: ")).strip().lower()
+            val = (await ainput(f"    Enable AI Rewrite (OpenRouter)? (y/n) [{'Y' if filters.get('rewrite_enabled') else 'N'}]: ")).strip().lower()
             if val in ("y", "yes"):
                 filters["rewrite_enabled"] = True
                 prompt_val = (await ainput("    Rewrite prompt: ")).strip()
@@ -568,11 +568,11 @@ async def start_forwarder(client):
                 text_to_rewrite = modified_text if modified_text is not None else getattr(event.message, 'text', '')
                 if text_to_rewrite and text_to_rewrite.strip():
                     try:
-                        import ollama_client
+                        import openrouter_client
                         prompt = task.get("filters", {}).get("rewrite_prompt", "Rewrite this to avoid copyright.")
-                        add_log(f"  [AI] '{task['name']}' rewriting via Ollama...")
-                        rewritten = await ollama_client.generate_with_ollama(text_to_rewrite, system_prompt=prompt)
-                        if not rewritten.startswith("[Ollama Error:"):
+                        add_log(f"  [AI] '{task['name']}' rewriting via OpenRouter...")
+                        rewritten = await openrouter_client.generate_with_openrouter(text_to_rewrite, system_prompt=prompt)
+                        if not rewritten.startswith("[AI Error:"):
                             modified_text = rewritten
                             add_log(f"  [AI OK] Rewrote {len(text_to_rewrite)} chars to {len(rewritten)} chars.")
                         else:
@@ -855,7 +855,7 @@ async def generate_finance_report():
         print("No recent messages found for this task.")
         return
         
-    print(f"\nGathering {len(task_msgs)} messages. Sending to local Ollama...")
+    print(f"\nGathering {len(task_msgs)} messages. Sending to OpenRouter AI...")
     combined_text = "\n\n---\n\n".join([f"Time: {time.strftime('%Y-%m-%d %H:%M', time.localtime(msg['parent_time']))}\n{msg['text_content']}" for msg in task_msgs])
 
     system_prompt = (
@@ -866,13 +866,13 @@ async def generate_finance_report():
     )
     
     try:
-        import ollama_client
-        report = await ollama_client.generate_with_ollama(combined_text, system_prompt=system_prompt)
+        import openrouter_client
+        report = await openrouter_client.generate_with_openrouter(combined_text, system_prompt=system_prompt)
         print("\n================ FINANCIAL REPORT ================\n")
         print(report)
         print("\n==================================================\n")
     except Exception as e:
-        print(f"Error communicating with Ollama: {e}")
+        print(f"Error communicating with OpenRouter: {e}")
 
 async def main_menu(client):
     while True:
@@ -892,7 +892,7 @@ async def main_menu(client):
         print("11. Duplicate Task")
         print("12. View Statistics")
         print("13. View Message Threads (Replies)")
-        print("14. Generate AI Finance Report (Ollama)")
+        print("14. Generate AI Finance Report")
         print("0.  Exit")
 
         choice = (await ainput("\nSelect option: ")).strip()
