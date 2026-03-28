@@ -2,11 +2,16 @@ import json
 import urllib.request
 import asyncio
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 async def generate_with_openrouter(prompt, model="z-ai/glm-4.5-air:free", system_prompt=None):
     """Generates a response from OpenRouter API asynchronously."""
     url = "https://openrouter.ai/api/v1/chat/completions"
-    api_key = os.getenv("OPENROUTER_API_KEY", "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")
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        return "[AI Error: OPENROUTER_API_KEY missing in .env]"
     
     messages = []
     if system_prompt:
