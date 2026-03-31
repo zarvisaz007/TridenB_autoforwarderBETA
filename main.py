@@ -947,7 +947,14 @@ async def main():
         print("Error: API_ID, API_HASH, and PHONE must be set in .env")
         sys.exit(1)
 
-    client = TelegramClient(SESSION_NAME, int(api_id), api_hash)
+    client = TelegramClient(
+        SESSION_NAME, 
+        int(api_id), 
+        api_hash,
+        connection_retries=None,  # Retry forever on disconnect
+        retry_delay=5,            # Wait 5 seconds between retries
+        auto_reconnect=True       # Automatically reconnect
+    )
     await client.start(phone=phone)
     print("Authenticated successfully.")
     sync_paused_from_tasks()
